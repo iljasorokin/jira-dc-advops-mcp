@@ -1,0 +1,20 @@
+{
+  "name": "jira-dc-advops-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Jira DC MCP: Tempo Structure board read (forest + values) via proxy auth",
+  "bin": {
+    "jira-dc-advops-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^3.24.2"
+  }
+}
