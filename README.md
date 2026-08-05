@@ -31,6 +31,28 @@ Same sources as `@atlassian-dc-mcp/jira`:
 | `structure_getValues` | Attribute matrix for given `rows` (key/summary/status/…) |
 | `structure_getBoard` | **Fast path:** forest + values as nested tree (default attrs) |
 | `structure_getBoardToFile` | Same as getBoard, dump JSON to a local file (large boards) |
+| `structure_listFolders` | Folders in a structure (`rowId`, name/summary, `folderId`) |
+
+## Tools (write)
+
+| Tool | When |
+|------|------|
+| `structure_addIssues` | Add issue(s) under a folder / parent row (`underRowId` \| `folderName` \| `folderId`) |
+
+### Add issues under a folder
+
+```
+structure_listFolders
+  structureId: 182
+
+structure_addIssues
+  structureId: 182
+  folderName: "Орг. задачи"   # or underRowId: 29396
+  issueKeys: ["MNG-2538", "SCRM-15318"]
+  # skipIfPresent: true (default)
+```
+
+Uses `POST /rest/structure/2.0/forest/update` with `action: add`. Resolves issue keys → numeric ids. Skips issues already direct children of the parent unless `skipIfPresent: false`.
 
 ### Fast path for a Structure Board
 
@@ -68,6 +90,6 @@ After changing `index.js`, reload MCP servers in Cursor so new tools appear.
 
 ## Notes
 
-- Write/update forest (`/forest/update`) is **not** exposed yet — read-only v1.
+- Forest write beyond `structure_addIssues` (move/remove rows, create folders) is not exposed yet.
 - For issue details beyond Structure columns, use `user-jira-dc` (`jira_getIssue` / JQL).
 - Large boards: prefer `structure_getBoardToFile` over stuffing the full tree into chat.

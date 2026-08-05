@@ -31,6 +31,28 @@
 | `structure_getValues` | Матрица атрибутов для заданных `rows` (key/summary/status/…) |
 | `structure_getBoard` | **Быстрый путь:** forest + values как вложенное дерево (атрибуты по умолчанию) |
 | `structure_getBoardToFile` | То же, что getBoard, выгрузка JSON в локальный файл (крупные доски) |
+| `structure_listFolders` | Папки в структуре (`rowId`, имя/summary, `folderId`) |
+
+## Tools (запись)
+
+| Tool | Когда использовать |
+|------|--------------------|
+| `structure_addIssues` | Добавить issue(и) под папку / родительский row (`underRowId` \| `folderName` \| `folderId`) |
+
+### Добавить задачи в папку
+
+```
+structure_listFolders
+  structureId: 182
+
+structure_addIssues
+  structureId: 182
+  folderName: "Орг. задачи"   # или underRowId: 29396
+  issueKeys: ["MNG-2538", "SCRM-15318"]
+  # skipIfPresent: true (по умолчанию)
+```
+
+Использует `POST /rest/structure/2.0/forest/update` с `action: add`. Ключи issue → числовые id. Уже лежащие прямыми детьми parent — пропускаются, пока `skipIfPresent` не `false`.
 
 ### Быстрый путь для Structure Board
 
@@ -68,6 +90,6 @@ Structure отдаёт сериализованную `formula`. MCP разби�
 
 ## Замечания
 
-- Запись / обновление forest (`/forest/update`) **пока не** вынесена — v1 только на чтение.
+- Запись forest кроме `structure_addIssues` (move/remove, создание папок) пока не вынесена.
 - Детали issue сверх колонок Structure — через `user-jira-dc` (`jira_getIssue` / JQL).
 - Крупные доски: предпочитать `structure_getBoardToFile`, не засовывать полное дерево в чат.

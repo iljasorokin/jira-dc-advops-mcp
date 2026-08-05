@@ -1,9 +1,9 @@
 {
   "name": "jira-dc-advops-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Local Jira DC MCP: Tempo Structure board read (forest + values) via proxy auth",
+  "description": "Local Jira DC MCP: Tempo Structure board read + add issues under folders (proxy auth)",
   "bin": {
     "jira-dc-advops-mcp": "./index.js"
   },

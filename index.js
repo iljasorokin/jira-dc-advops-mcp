@@ -5,6 +5,7 @@
  * - read forest (hierarchy) for a structureId
  * - load Structure attribute values (key, summary, status, …)
  * - convenience board dump as nested tree (+ optional file)
+ * - add issues under a folder via forest/update
  *
  * Auth/host: same as @atlassian-dc-mcp/jira (proxy localhost:8444 + keychain token).
  */
@@ -171,6 +172,26 @@ function isGeneratorOrLoop(row) {
   return t.endsWith(GENERATOR_TYPE_SUFFIX) || t.endsWith(LOOP_MARKER_TYPE_SUFFIX);
 }
 
+function isFolderRow(row) {
+  const t = row.itemType || '';
+  return t.endsWith(':type-folder') || t === 'folder';
+}
+
+/** Direct children of parentRowId (by depth nesting in flat formula order). */
+function getDirectChildren(rows, parentRowId) {
+  const parentIdx = rows.findIndex((r) => r.rowId === parentRowId);
+  if (parentIdx < 0) return [];
+  const parentDepth = rows[parentIdx].depth;
+  const children = [];
+  for (let i = parentIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.parseError) continue;
+    if (r.depth <= parentDepth) break;
+    if (r.depth === parentDepth + 1) children.push(r);
+  }
+  return children;
+}
+
 function buildTree(rows, { includeGenerators = true } = {}) {
   const roots = [];
   const stack = []; // { node, depth }
@@ -267,6 +288,275 @@ async function getStructure(structureId, { withOwner = true, withPermissions = f
 
 async function getForestLatest(forestSpec) {
   return jiraApi('POST', '/rest/structure/2.0/forest/latest', forestSpec);
+}
+
+async function updateForest({ forestSpec, version, actions }) {
+  return jiraApi('POST', '/rest/structure/2.0/forest/update', {
+    spec: forestSpec,
+    version,
+    actions,
+  });
+}
+
+async function resolveIssueRefs(issueKeys = [], issueIds = []) {
+  const resolved = [];
+  const seen = new Set();
+
+  for (const raw of issueIds || []) {
+    const id = Number(raw);
+    if (!Number.isFinite(id) || id <= 0) {
+      throw new Error(`Invalid issueId: ${raw}`);
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    resolved.push({ issueId: id, key: null });
+  }
+
+  for (const key of issueKeys || []) {
+    const k = String(key).trim().toUpperCase();
+    if (!k) continue;
+    const issue = await jiraApi('GET', `/rest/api/2/issue/${encodeURIComponent(k)}?fields=id,key,summary`);
+    const id = Number(issue.id);
+    if (seen.has(id)) {
+      const hit = resolved.find((r) => r.issueId === id);
+      if (hit && !hit.key) hit.key = issue.key;
+      continue;
+    }
+    seen.add(id);
+    resolved.push({
+      issueId: id,
+      key: issue.key,
+      summary: issue.fields?.summary,
+    });
+  }
+
+  // Fill keys for bare ids when helpful
+  for (const item of resolved) {
+    if (item.key) continue;
+    try {
+      const issue = await jiraApi(
+        'GET',
+        `/rest/api/2/issue/${item.issueId}?fields=key,summary`,
+      );
+      item.key = issue.key;
+      item.summary = issue.fields?.summary;
+    } catch {
+      // leave key null
+    }
+  }
+
+  return resolved;
+}
+
+async function listFolders(structureId) {
+  const spec = { structureId: Number(structureId) };
+  const forest = await getForestLatest(spec);
+  const itemTypes = forest.itemTypes || {};
+  const rows = parseForestFormula(forest.formula, itemTypes);
+  const folders = rows.filter((r) => !r.parseError && isFolderRow(r));
+  if (!folders.length) {
+    return {
+      structureId: Number(structureId),
+      version: forest.version,
+      count: 0,
+      folders: [],
+    };
+  }
+  const { byRow } = await getAttributeValues({
+    forestSpec: spec,
+    rows: folders.map((f) => f.rowId),
+    attributes: [{ id: 'summary', format: 'text' }],
+  });
+  return {
+    structureId: Number(structureId),
+    version: forest.version,
+    count: folders.length,
+    folders: folders.map((f) => ({
+      rowId: f.rowId,
+      depth: f.depth,
+      folderId: f.itemLongId ?? null,
+      name: byRow[f.rowId]?.summary ?? null,
+      itemRaw: f.itemRaw,
+    })),
+  };
+}
+
+async function resolveUnderFolder({ structureId, underRowId, folderName, folderId }) {
+  const forest = await getForestLatest({ structureId: Number(structureId) });
+  const rows = parseForestFormula(forest.formula, forest.itemTypes || {});
+  const folderRows = rows.filter((r) => !r.parseError && isFolderRow(r));
+
+  let under;
+  let resolvedName = null;
+
+  if (underRowId != null) {
+    under = rows.find((r) => r.rowId === Number(underRowId));
+    if (!under) {
+      throw new Error(`underRowId ${underRowId} not found in structure ${structureId}`);
+    }
+  } else if (folderId != null) {
+    const matches = folderRows.filter((r) => Number(r.itemLongId) === Number(folderId));
+    if (!matches.length) throw new Error(`folderId ${folderId} not found`);
+    if (matches.length > 1) {
+      throw new Error(
+        `Ambiguous folderId ${folderId}: rowIds ${matches.map((m) => m.rowId).join(',')}`,
+      );
+    }
+    under = matches[0];
+  } else if (folderName) {
+    // Need summaries to match by name
+    const { byRow } = await getAttributeValues({
+      forestSpec: { structureId: Number(structureId) },
+      rows: folderRows.map((f) => f.rowId),
+      attributes: [{ id: 'summary', format: 'text' }],
+    });
+    const named = folderRows.map((f) => ({
+      ...f,
+      name: byRow[f.rowId]?.summary ?? '',
+    }));
+    const needle = String(folderName).trim().toLowerCase();
+    const exact = named.filter((f) => f.name.toLowerCase() === needle);
+    const partial =
+      exact.length > 0
+        ? exact
+        : named.filter((f) => f.name.toLowerCase().includes(needle));
+    if (!partial.length) {
+      throw new Error(
+        `Folder name ~"${folderName}" not found. Use structure_listFolders.`,
+      );
+    }
+    if (partial.length > 1) {
+      throw new Error(
+        `Ambiguous folderName "${folderName}": ` +
+          partial.map((m) => `rowId=${m.rowId} "${m.name}"`).join('; '),
+      );
+    }
+    under = partial[0];
+    resolvedName = partial[0].name;
+  } else {
+    throw new Error('Provide underRowId, folderId, or folderName');
+  }
+
+  if (resolvedName == null && isFolderRow(under)) {
+    try {
+      const { byRow } = await getAttributeValues({
+        forestSpec: { structureId: Number(structureId) },
+        rows: [under.rowId],
+        attributes: [{ id: 'summary', format: 'text' }],
+      });
+      resolvedName = byRow[under.rowId]?.summary ?? null;
+    } catch {
+      // optional
+    }
+  }
+
+  return { forest, rows, under, folderName: resolvedName };
+}
+
+/**
+ * Add issues under a Structure folder (or any parent row).
+ * Uses POST /rest/structure/2.0/forest/update action=add.
+ */
+async function addIssuesToFolder({
+  structureId,
+  underRowId,
+  folderName,
+  folderId,
+  issueKeys,
+  issueIds,
+  afterRowId,
+  beforeRowId,
+  skipIfPresent = true,
+}) {
+  const keys = issueKeys || [];
+  const ids = issueIds || [];
+  if (!keys.length && !ids.length) {
+    throw new Error('Provide issueKeys and/or issueIds');
+  }
+
+  const resolved = await resolveIssueRefs(keys, ids);
+  if (!resolved.length) throw new Error('No issues to add');
+
+  const { forest, rows, under, folderName: resolvedFolderName } = await resolveUnderFolder({
+    structureId,
+    underRowId,
+    folderName,
+    folderId,
+  });
+
+  const children = getDirectChildren(rows, under.rowId);
+  const presentIssueIds = new Set(
+    children.filter((c) => c.issueId != null).map((c) => c.issueId),
+  );
+
+  const toAdd = [];
+  const skipped = [];
+  for (const item of resolved) {
+    if (skipIfPresent && presentIssueIds.has(item.issueId)) {
+      const existing = children.find((c) => c.issueId === item.issueId);
+      skipped.push({
+        issueId: item.issueId,
+        key: item.key,
+        reason: 'already under parent',
+        rowId: existing?.rowId,
+      });
+      continue;
+    }
+    toAdd.push(item);
+  }
+
+  if (!toAdd.length) {
+    return {
+      structureId: Number(structureId),
+      underRowId: under.rowId,
+      folderName: resolvedFolderName,
+      changed: false,
+      reason: 'all issues already present under parent',
+      skipped,
+      added: [],
+      version: forest.version,
+    };
+  }
+
+  // Relative forest formula: siblings at depth 0 under the parent coordinate.
+  const forestParts = toAdd.map((item, i) => `-${100 + i}:0:${item.issueId}`);
+  const action = {
+    action: 'add',
+    under: under.rowId,
+    after: afterRowId != null ? Number(afterRowId) : 0,
+    before: beforeRowId != null ? Number(beforeRowId) : 0,
+    forest: forestParts.join(','),
+  };
+
+  const update = await updateForest({
+    forestSpec: { structureId: Number(structureId) },
+    version: forest.version,
+    actions: [action],
+  });
+
+  const oldRowIds = update.oldRowIds || [];
+  const newRowIds = update.newRowIds || [];
+  const added = toAdd.map((item, i) => ({
+    issueId: item.issueId,
+    key: item.key,
+    summary: item.summary,
+    tempRowId: oldRowIds[i] ?? -(100 + i),
+    rowId: newRowIds[i] ?? null,
+  }));
+
+  return {
+    structureId: Number(structureId),
+    underRowId: under.rowId,
+    folderName: resolvedFolderName,
+    changed: true,
+    successfulActions: update.successfulActions,
+    problems: update.problems || [],
+    added,
+    skipped,
+    version:
+      update.forestUpdates?.[0]?.version ||
+      forest.version,
+  };
 }
 
 async function getAttributeValues({ forestSpec, rows, attributes }) {
@@ -373,6 +663,13 @@ const readOnly = {
   openWorldHint: true,
 };
 
+const writeForest = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+
 const attributeSchema = z.union([
   z.string(),
   z.object({
@@ -384,7 +681,7 @@ const attributeSchema = z.union([
 
 const server = new McpServer({
   name: 'jira-dc-advops-mcp',
-  version: '1.0.0',
+  version: '1.1.0',
 });
 
 server.tool(
@@ -556,6 +853,76 @@ server.tool(
         attributes: board.attributes,
         flat: Boolean(args.flat),
       });
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.tool(
+  'structure_listFolders',
+  'List folders in a Tempo Structure (rowId, depth, name/summary, folderId). Use before structure_addIssues to pick underRowId or folderName.',
+  {
+    structureId: z.number().describe('Structure id, e.g. 182 (Структура «Самоограниченные»)'),
+  },
+  { title: 'List Structure folders', ...readOnly },
+  async ({ structureId }) => {
+    try {
+      return ok(await listFolders(structureId));
+    } catch (error) {
+      return fail(error);
+    }
+  },
+);
+
+server.tool(
+  'structure_addIssues',
+  'Add one or more Jira issues under a Structure folder (or any parent row). POST /rest/structure/2.0/forest/update action=add. Identify parent via underRowId, folderName, or folderId. Pass issueKeys and/or issueIds. Skips issues already under that parent unless skipIfPresent=false.',
+  {
+    structureId: z.number().describe('Structure id, e.g. 182'),
+    underRowId: z
+      .number()
+      .optional()
+      .describe('Parent rowId (folder or issue). Prefer this when known.'),
+    folderName: z
+      .string()
+      .optional()
+      .describe('Folder summary/name (exact, else unique substring). Ambiguous → error.'),
+    folderId: z
+      .number()
+      .optional()
+      .describe('Internal Structure folder item id (from type-folder N in itemRaw 4/N)'),
+    issueKeys: z
+      .array(z.string())
+      .optional()
+      .describe('Issue keys to add, e.g. ["MNG-2538","SCRM-15318"]'),
+    issueIds: z
+      .array(z.number())
+      .optional()
+      .describe('Numeric Jira issue ids (alternative/complement to issueKeys)'),
+    afterRowId: z
+      .number()
+      .optional()
+      .describe('Insert after this sibling rowId under the parent (default: first child)'),
+    beforeRowId: z
+      .number()
+      .optional()
+      .describe('Insert before this sibling rowId under the parent'),
+    skipIfPresent: z
+      .boolean()
+      .optional()
+      .describe('Skip issues already direct children of the parent (default true)'),
+  },
+  { title: 'Add issues under Structure folder', ...writeForest },
+  async (args) => {
+    try {
+      if (!args.underRowId && !args.folderName && args.folderId == null) {
+        throw new Error('Provide underRowId, folderName, or folderId');
+      }
+      if (!(args.issueKeys?.length) && !(args.issueIds?.length)) {
+        throw new Error('Provide issueKeys and/or issueIds');
+      }
+      return ok(await addIssuesToFolder(args));
     } catch (error) {
       return fail(error);
     }
