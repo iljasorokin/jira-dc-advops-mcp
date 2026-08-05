@@ -2,6 +2,8 @@
 
 Local MCP helpers for Jira Data Center advanced ops used from Cursor.
 
+Русская документация: [README.ru.md](./README.ru.md).
+
 First capability: **read Tempo Structure boards** (hierarchy + column values)
 via Structure REST `/rest/structure/2.0/*`.
 
