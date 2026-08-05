@@ -20,7 +20,7 @@ Same sources as `@atlassian-dc-mcp/jira`:
 - `JIRA_HOST` (env or `~/.atlassian-dc-mcp/jira.env`) — typically your local proxy, e.g. `https://localhost:8444`
 - `JIRA_API_TOKEN` (env), or macOS Keychain service `atlassian-dc-mcp` / account `jira-token`
 
-Do **not** commit tokens or `*.env` files.
+Do **not** commit tokens or `*.env` files. See [SECURITY.md](./SECURITY.md).
 
 ## Tools (read)
 
