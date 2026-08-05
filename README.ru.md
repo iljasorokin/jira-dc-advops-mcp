@@ -20,7 +20,7 @@
 - `JIRA_HOST` (env или `~/.atlassian-dc-mcp/jira.env`) — обычно локальный proxy, напр. `https://localhost:8444`
 - `JIRA_API_TOKEN` (env) или macOS Keychain: service `atlassian-dc-mcp` / account `jira-token`
 
-Токены и `*.env` **не** коммитить.
+Токены и `*.env` **не** коммитить. См. [SECURITY.md](./SECURITY.md).
 
 ## Tools (чтение)
 
