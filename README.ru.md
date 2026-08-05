@@ -2,15 +2,14 @@
 
 Локальные MCP-инструменты для расширенных операций Jira Data Center в Cursor.
 
-Первая возможность: **чтение досок Tempo Structure** (иерархия + значения колонок)
+Возможности: **чтение и точечная запись Tempo Structure** (иерархия + значения колонок)
 через Structure REST `/rest/structure/2.0/*`.
 
 Работает через **тот же proxy/auth**, что и `@atlassian-dc-mcp/jira`
-(`JIRA_HOST=https://localhost:8444` + токен из Keychain). Предпочитать
-эти tools вместо ad-hoc `curl` к `jr.upzero.net`.
+(локальный TLS-proxy + токен из Keychain / env). Предпочитать эти tools
+вместо ad-hoc `curl` к публичному hostname Jira.
 
-Пример URL доски: `https://jr.upzero.net/secure/StructureBoard.jspa?s=182`
-→ `structureId = 182` (в формулировках: Структура «Самоограниченные»).
+`structureId` берётся из `StructureBoard.jspa?s=<id>`.
 
 Английская версия: [README.md](./README.md).
 
@@ -18,8 +17,10 @@
 
 Те же источники, что у `@atlassian-dc-mcp/jira`:
 
-- `JIRA_HOST` (env или `~/.atlassian-dc-mcp/jira.env`)
+- `JIRA_HOST` (env или `~/.atlassian-dc-mcp/jira.env`) — обычно локальный proxy, напр. `https://localhost:8444`
 - `JIRA_API_TOKEN` (env) или macOS Keychain: service `atlassian-dc-mcp` / account `jira-token`
+
+Токены и `*.env` **не** коммитить.
 
 ## Tools (чтение)
 
@@ -43,12 +44,12 @@
 
 ```
 structure_listFolders
-  structureId: 182
+  structureId: 123
 
 structure_addIssues
-  structureId: 182
-  folderName: "Орг. задачи"   # или underRowId: 29396
-  issueKeys: ["MNG-2538", "SCRM-15318"]
+  structureId: 123
+  folderName: "Моя папка"   # или underRowId: <rowId>
+  issueKeys: ["PROJ-1", "PROJ-2"]
   # skipIfPresent: true (по умолчанию)
 ```
 
@@ -58,7 +59,7 @@ structure_addIssues
 
 ```
 structure_getBoard
-  structureId: 182
+  structureId: 123
   # optional: переопределение attributes; по умолчанию: key, summary, status, issuetype
 ```
 
@@ -78,7 +79,7 @@ Structure отдаёт сериализованную `formula`. MCP разби�
 ```json
 "jira-dc-advops": {
   "command": "node",
-  "args": ["/Users/iljasorokin/jira-dc-advops-mcp/index.js"],
+  "args": ["/path/to/jira-dc-advops-mcp/index.js"],
   "env": {
     "JIRA_HOST": "https://localhost:8444",
     "NODE_TLS_REJECT_UNAUTHORIZED": "0"

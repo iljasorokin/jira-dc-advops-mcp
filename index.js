@@ -7,7 +7,7 @@
  * - convenience board dump as nested tree (+ optional file)
  * - add issues under a folder via forest/update
  *
- * Auth/host: same as @atlassian-dc-mcp/jira (proxy localhost:8444 + keychain token).
+ * Auth/host: same as @atlassian-dc-mcp/jira (local TLS proxy + keychain token).
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -708,7 +708,7 @@ server.tool(
   'structure_get',
   'Get Tempo Structure metadata by id (name, description, owner). Does not include hierarchy — use structure_getForest / structure_getBoard.',
   {
-    structureId: z.number().describe('Structure id from StructureBoard.jspa?s=…, e.g. 182'),
+    structureId: z.number().describe('Structure id from StructureBoard.jspa?s=…'),
     withOwner: z.boolean().optional().describe('Include owner (default true)'),
     withPermissions: z.boolean().optional().describe('Include permission rules (default false)'),
   },
@@ -731,7 +731,7 @@ server.tool(
   'structure_getForest',
   'Read Structure forest (hierarchy) via POST /rest/structure/2.0/forest/latest. Returns formula + parsed flat rows (rowId, depth, issueId / itemType). Prefer structure_getBoard for keys/summaries.',
   {
-    structureId: z.number().optional().describe('Structure id, e.g. 182'),
+    structureId: z.number().optional().describe('Structure id'),
     forestSpec: z
       .record(z.any())
       .optional()
@@ -769,7 +769,7 @@ server.tool(
   'structure_getValues',
   'Load Structure attribute values for row ids (POST /rest/structure/2.0/value). Get row ids from structure_getForest. Default attributes: key, summary, status, issuetype.',
   {
-    structureId: z.number().optional().describe('Structure id, e.g. 182'),
+    structureId: z.number().optional().describe('Structure id'),
     forestSpec: z.record(z.any()).optional().describe('Raw RestForestSpec; overrides structureId'),
     rows: z.array(z.number()).min(1).describe('Row ids from forest formula'),
     attributes: z
@@ -800,9 +800,9 @@ server.tool(
 
 server.tool(
   'structure_getBoard',
-  'Fast path: read a Structure Board as nested tree with key/summary/status/issuetype (forest + values). Example: structureId=182 from StructureBoard.jspa?s=182. Use structure_getBoardToFile for large boards.',
+  'Fast path: read a Structure Board as nested tree with key/summary/status/issuetype (forest + values). Use structure_getBoardToFile for large boards.',
   {
-    structureId: z.number().optional().describe('Structure id, e.g. 182'),
+    structureId: z.number().optional().describe('Structure id'),
     forestSpec: z.record(z.any()).optional().describe('Raw RestForestSpec; overrides structureId'),
     attributes: z
       .array(attributeSchema)
@@ -831,7 +831,7 @@ server.tool(
   'structure_getBoardToFile',
   'Same as structure_getBoard but writes JSON to a local file (for large boards). Returns path + meta without stuffing the full tree into chat.',
   {
-    structureId: z.number().optional().describe('Structure id, e.g. 182'),
+    structureId: z.number().optional().describe('Structure id'),
     forestSpec: z.record(z.any()).optional().describe('Raw RestForestSpec; overrides structureId'),
     filePath: z.string().describe('Absolute path to write board JSON'),
     attributes: z.array(attributeSchema).optional(),
@@ -863,7 +863,7 @@ server.tool(
   'structure_listFolders',
   'List folders in a Tempo Structure (rowId, depth, name/summary, folderId). Use before structure_addIssues to pick underRowId or folderName.',
   {
-    structureId: z.number().describe('Structure id, e.g. 182 (Структура «Самоограниченные»)'),
+    structureId: z.number().describe('Structure id'),
   },
   { title: 'List Structure folders', ...readOnly },
   async ({ structureId }) => {
@@ -879,7 +879,7 @@ server.tool(
   'structure_addIssues',
   'Add one or more Jira issues under a Structure folder (or any parent row). POST /rest/structure/2.0/forest/update action=add. Identify parent via underRowId, folderName, or folderId. Pass issueKeys and/or issueIds. Skips issues already under that parent unless skipIfPresent=false.',
   {
-    structureId: z.number().describe('Structure id, e.g. 182'),
+    structureId: z.number().describe('Structure id'),
     underRowId: z
       .number()
       .optional()
@@ -895,7 +895,7 @@ server.tool(
     issueKeys: z
       .array(z.string())
       .optional()
-      .describe('Issue keys to add, e.g. ["MNG-2538","SCRM-15318"]'),
+      .describe('Issue keys to add, e.g. ["PROJ-1","PROJ-2"]'),
     issueIds: z
       .array(z.number())
       .optional()
